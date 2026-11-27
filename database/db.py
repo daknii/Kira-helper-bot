@@ -56,8 +56,7 @@ class Database:
                 staff_role_ids TEXT DEFAULT '[]',
                 canal_entrada INTEGER,
                 canal_saida INTEGER,
-                canal_punicoes INTEGER,
-                canal_analise_divisao INTEGER
+                canal_punicoes INTEGER
             );
             """
         )
@@ -83,7 +82,6 @@ class Database:
                 "canal_entrada": "welcome_channel_id",
                 "canal_saida": "leave_channel_id",
                 "canal_punicoes": "punishments_channel_id",
-                "canal_analise_divisao": None,
             }
 
             select_exprs = ["guild_id"]
@@ -129,8 +127,7 @@ class Database:
                     staff_role_ids TEXT DEFAULT '[]',
                     canal_entrada INTEGER,
                     canal_saida INTEGER,
-                    canal_punicoes INTEGER,
-                    canal_analise_divisao INTEGER
+                    canal_punicoes INTEGER
                 );
                 INSERT INTO guild_config_new (
                     guild_id,
@@ -139,7 +136,6 @@ class Database:
                     canal_entrada,
                     canal_saida,
                     canal_punicoes,
-                    canal_analise_divisao,
                     staff_role_ids
                 )
                 SELECT {", ".join(select_exprs)} FROM guild_config;
@@ -155,13 +151,17 @@ class Database:
                 "canal_entrada": "INTEGER",
                 "canal_saida": "INTEGER",
                 "canal_punicoes": "INTEGER",
-                "canal_analise_divisao": "INTEGER",
             }
             for col, col_type in expected_columns.items():
                 if col not in existing_columns:
                     await self.conn.execute(
                         f"ALTER TABLE guild_config ADD COLUMN {col} {col_type}"
                     )
+
+            if "canal_analise_divisao" in existing_columns:
+                await self.conn.execute(
+                    "ALTER TABLE guild_config DROP COLUMN canal_analise_divisao"
+                )
 
         await self.conn.commit()
 
@@ -177,8 +177,7 @@ class Database:
                 staff_role_ids,
                 canal_entrada,
                 canal_saida,
-                canal_punicoes,
-                canal_analise_divisao
+                canal_punicoes
             FROM guild_config
             WHERE guild_id = ?
             """,
@@ -196,7 +195,6 @@ class Database:
         canal_entrada: int | None = None,
         canal_saida: int | None = None,
         canal_punicoes: int | None = None,
-        canal_analise_divisao: int | None = None,
     ) -> aiosqlite.Row:
         """Salva ou atualiza parcialmente a configuração do servidor."""
         assert self.conn is not None
@@ -215,10 +213,9 @@ class Database:
                 staff_role_ids,
                 canal_entrada,
                 canal_saida,
-                canal_punicoes,
-                canal_analise_divisao
+                canal_punicoes
             )
-            VALUES (?, ?, ?, COALESCE(?, '[]'), ?, ?, ?, ?)
+            VALUES (?, ?, ?, COALESCE(?, '[]'), ?, ?, ?)
             ON CONFLICT(guild_id) DO UPDATE SET
                 canal_logs = COALESCE(excluded.canal_logs, guild_config.canal_logs),
                 categoria_tickets = COALESCE(excluded.categoria_tickets, guild_config.categoria_tickets),
@@ -228,8 +225,7 @@ class Database:
                 END,
                 canal_entrada = COALESCE(excluded.canal_entrada, guild_config.canal_entrada),
                 canal_saida = COALESCE(excluded.canal_saida, guild_config.canal_saida),
-                canal_punicoes = COALESCE(excluded.canal_punicoes, guild_config.canal_punicoes),
-                canal_analise_divisao = COALESCE(excluded.canal_analise_divisao, guild_config.canal_analise_divisao)
+                canal_punicoes = COALESCE(excluded.canal_punicoes, guild_config.canal_punicoes)
             """,
             (
                 guild_id,
@@ -239,7 +235,6 @@ class Database:
                 canal_entrada,
                 canal_saida,
                 canal_punicoes,
-                canal_analise_divisao,
                 serialized_staff,
                 serialized_staff,
             ),

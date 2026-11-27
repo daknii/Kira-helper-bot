@@ -18,6 +18,7 @@ TOPIC_USER_RE = re.compile(r"user_id:(\d+)")
 CHANNEL_SLUG_RE = re.compile(r"[^a-z0-9-]+")
 
 _closing_channels: set[int] = set()
+_opening_tickets: set[tuple[int, int]] = set()
 
 
 def _sanitize_username(username: str, fallback_id: int) -> str:
@@ -97,6 +98,36 @@ class TicketCloseView(discord.ui.View):
             )
             return
 
+        owner_id = _extract_owner_id(channel.topic)
+        if owner_id is None:
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description="este canal não é um ticket.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+
+        bot = cast("KiraBot", interaction.client)
+        member = interaction.user
+        allowed = member.id == owner_id
+        if isinstance(member, discord.Member) and not allowed:
+            if member.guild_permissions.manage_channels:
+                allowed = True
+            else:
+                staff_ids = await bot.db.get_staff_roles(guild.id)
+                allowed = any(role.id in staff_ids for role in member.roles)
+        if not allowed:
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description="só quem abriu o ticket ou a staff pode fechá-lo.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+
         if channel.id in _closing_channels:
             await interaction.response.send_message(
                 embed=discord.Embed(
@@ -111,22 +142,21 @@ class TicketCloseView(discord.ui.View):
         try:
             await interaction.response.send_message(
                 embed=discord.Embed(
-                    description="gerando transcript e fechando ticket em 5 segundos...",
+                    description="gerando transcript e fechando o ticket...",
                     color=DEFAULT_COLOR,
                 )
             )
 
-            bot = cast("KiraBot", interaction.client)
             config = await bot.db.get_guild_config(guild.id)
+            try:
+                transcript_buffer, message_count = await _build_transcript(channel)
+            except discord.HTTPException:
+                transcript_buffer, message_count = None, 0
 
-            transcript_buffer, message_count = await _build_transcript(channel)
-
-            if config and config["canal_logs"]:
+            if config and config["canal_logs"] and transcript_buffer is not None:
                 log_channel = guild.get_channel(config["canal_logs"])
                 if isinstance(log_channel, discord.TextChannel):
-                    owner_id = _extract_owner_id(channel.topic)
-                    owner_text = f"<@{owner_id}> (`{owner_id}`)" if owner_id else "desconhecido"
-
+                    owner_text = f"<@{owner_id}> (`{owner_id}`)"
                     log_embed = discord.Embed(
                         title="ticket encerrado",
                         description="\n".join(
@@ -141,15 +171,26 @@ class TicketCloseView(discord.ui.View):
                         timestamp=datetime.now(timezone.utc),
                     )
                     log_embed.set_footer(text=guild.name.lower())
-
                     transcript_file = discord.File(
                         fp=transcript_buffer,
                         filename=f"transcript-{channel.name}.txt",
                     )
-                    await log_channel.send(embed=log_embed, file=transcript_file)
+                    try:
+                        await log_channel.send(embed=log_embed, file=transcript_file)
+                    except (discord.Forbidden, discord.HTTPException):
+                        pass
 
             await asyncio.sleep(5)
-            await channel.delete(reason=f"ticket fechado por {interaction.user}")
+            try:
+                await channel.delete(reason=f"ticket fechado por {interaction.user}")
+            except (discord.Forbidden, discord.HTTPException):
+                await interaction.followup.send(
+                    embed=discord.Embed(
+                        description="não foi possível apagar o canal do ticket. verifique as permissões do bot.",
+                        color=DEFAULT_COLOR,
+                    ),
+                    ephemeral=True,
+                )
         finally:
             _closing_channels.discard(channel.id)
 
@@ -183,8 +224,30 @@ class TicketOpenView(discord.ui.View):
             )
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        open_key = (guild.id, user.id)
+        if open_key in _opening_tickets:
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description="seu ticket já está sendo aberto.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
 
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        _opening_tickets.add(open_key)
+        try:
+            await self._create_ticket(interaction, guild, user)
+        finally:
+            _opening_tickets.discard(open_key)
+
+    async def _create_ticket(
+        self,
+        interaction: discord.Interaction,
+        guild: discord.Guild,
+        user: discord.Member,
+    ) -> None:
         bot = cast("KiraBot", interaction.client)
         config = await bot.db.get_guild_config(guild.id)
         staff_ids = await bot.db.get_staff_roles(guild.id)
@@ -261,13 +324,32 @@ class TicketOpenView(discord.ui.View):
             )
 
         channel_name = f"ticket-{_sanitize_username(user.name, user.id)}"
-        ticket_channel = await guild.create_text_channel(
-            name=channel_name,
-            category=category,
-            topic=f"ticket · {marker}",
-            overwrites=overwrites,
-            reason=f"ticket aberto por {user}",
-        )
+        try:
+            ticket_channel = await guild.create_text_channel(
+                name=channel_name,
+                category=category,
+                topic=f"ticket · {marker}",
+                overwrites=overwrites,
+                reason=f"ticket aberto por {user}",
+            )
+        except discord.Forbidden:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    description="não tenho permissão para criar o canal do ticket.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    description="não foi possível criar o ticket. verifique se a categoria ainda tem espaço.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
 
         staff_mentions = " ".join(f"<@&{r.id}>" for r in staff_roles)
         welcome_embed = discord.Embed(
@@ -280,11 +362,30 @@ class TicketOpenView(discord.ui.View):
         )
         welcome_embed.set_footer(text=f"{guild.name.lower()} · use o botão abaixo para encerrar")
 
-        await ticket_channel.send(
-            content=f"{user.mention} {staff_mentions}",
-            embed=welcome_embed,
-            view=TicketCloseView(),
-        )
+        try:
+            await ticket_channel.send(
+                content=f"{user.mention} {staff_mentions}",
+                embed=welcome_embed,
+                view=TicketCloseView(),
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            removed = False
+            try:
+                await ticket_channel.delete(reason="falha ao iniciar o ticket")
+                removed = True
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+            if removed:
+                description = "não consegui enviar a mensagem inicial. o canal foi removido."
+            else:
+                description = (
+                    f"não consegui enviar a mensagem inicial em {ticket_channel.mention}."
+                )
+            await interaction.followup.send(
+                embed=discord.Embed(description=description, color=DEFAULT_COLOR),
+                ephemeral=True,
+            )
+            return
 
         await interaction.followup.send(
             embed=discord.Embed(
@@ -329,7 +430,18 @@ class Tickets(commands.Cog):
         )
         panel_embed.set_footer(text=f"{guild_name} · atendimento privado")
 
-        await interaction.channel.send(embed=panel_embed, view=TicketOpenView())
+        try:
+            await interaction.channel.send(embed=panel_embed, view=TicketOpenView())
+        except (discord.Forbidden, discord.HTTPException):
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description="não foi possível enviar o painel neste canal. verifique as permissões do bot.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+
         await interaction.response.send_message(
             embed=discord.Embed(
                 description="painel de tickets enviado neste canal.",

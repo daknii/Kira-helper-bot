@@ -20,6 +20,9 @@ class Events(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
+        if member.bot:
+            return
+
         guild = member.guild
         config = await self.bot.db.get_guild_config(guild.id)
         if not config or not config["canal_entrada"]:
@@ -49,6 +52,9 @@ class Events(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
+        if member.bot:
+            return
+
         guild = member.guild
         config = await self.bot.db.get_guild_config(guild.id)
         if not config or not config["canal_saida"]:

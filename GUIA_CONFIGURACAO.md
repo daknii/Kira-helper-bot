@@ -14,7 +14,7 @@ python main.py
 ```
 
 ### Pré-requisitos no Discord
-- **Discord Developer Portal → Bot → Privileged Gateway Intents:** ative **SERVER MEMBERS INTENT** e **MESSAGE CONTENT INTENT**.
+- **Discord Developer Portal → Bot → Privileged Gateway Intents:** ative **SERVER MEMBERS INTENT**. O bot não lê o conteúdo das mensagens, então **MESSAGE CONTENT INTENT** não é necessário.
 - **Hierarquia de Cargos no servidor:** arraste o cargo do bot para **acima** dos cargos dos membros comuns para que `/timeout`, `/kick`, `/ban` e a criação de tickets funcionem corretamente.
 
 ---
@@ -27,15 +27,16 @@ Em qualquer canal (restrito a **Administradores**), execute `/configurar`:
 | :--- | :--- | :--- |
 | `canal_logs` | Canal de texto | Logs detalhados de moderação e transcripts `.txt` de tickets (`#logs`) |
 | `categoria_tickets` | Categoria | Categoria onde os canais privados `ticket-usuario` são criados |
-| `cargo_staff_1` | Cargo | Cargo principal da staff (ex: alto-escalão) |
-| `cargo_staff_2` | Cargo | Segundo cargo de staff (opcional) |
-| `cargo_staff_3` | Cargo | Terceiro cargo de staff (opcional) |
+| `cargo_staff_1` | Cargo | Adiciona um cargo de staff (ex: alto-escalão) |
+| `cargo_staff_2` | Cargo | Adiciona outro cargo de staff (opcional) |
+| `cargo_staff_3` | Cargo | Adiciona outro cargo de staff (opcional) |
 | `canal_entrada` | Canal de texto | Mensagens automáticas de boas-vindas (`#🌊・entrada`) |
 | `canal_saida` | Canal de texto | Avisos discretos de saída (`#🌊・saída`) |
 | `canal_punicoes` | Canal de texto | Mural público de punições (`#⚠️・punições`) |
-| `canal_analise_divisao` | Canal de texto | Recebimento de pedidos de divisão (`#👑・alto-escalão`) |
 
-- Todos os campos são **opcionais**: você pode preencher tudo de uma vez ou atualizar apenas um campo sem perder os demais.
+- Todos os campos são **opcionais**: preencher um canal atualiza só aquele campo.
+- `cargo_staff_1`, `cargo_staff_2` e `cargo_staff_3` **somam** cargos à lista. Eles não apagam os que já estavam salvos. Para remover, use `/remove-staff`.
+- O cargo `@everyone` é recusado.
 - Rodar `/configurar` **sem parâmetros** exibe o painel atual de toda a configuração salva.
 
 ### Gerenciar múltiplos cargos de staff depois
@@ -74,13 +75,15 @@ Todos os cargos da lista recebem automaticamente:
 
 Liberados para **Administradores**, membros com a **permissão nativa** correspondente ou qualquer membro que possua **um dos cargos de staff** configurados:
 
-- `/warn <membro> <motivo>` — registra advertência no SQLite, envia DM (tratando DM fechada), publica no chat, no mural de punições e nos logs.
-- `/warns <membro>` — lista todas as advertências do membro (ID, motivo, moderador e data).
+- `/warn <membro> <motivo>` — registra advertência no SQLite, tenta avisar na DM, responde em privado e publica no mural de punições e nos logs.
+- `/warns <membro>` — lista as advertências do membro (ID, motivo, moderador e data). Mostra as 10 mais recentes quando houver mais.
 - `/unwarn <id_warn>` — remove uma advertência pelo ID e registra nos logs.
-- `/timeout <membro> <minutos> [motivo]` — aplica castigo nativo (1 a 40320 min) e registra nos logs/punições.
-- `/kick <membro> [motivo]` — expulsa respeitando hierarquia de cargos e registra nos logs/punições.
-- `/ban <membro> [motivo] [deletar_mensagens_dias]` — bane respeitando hierarquia e registra nos logs/punições.
+- `/timeout <membro> <minutos> [motivo]` — aplica castigo nativo (1 a 40320 min), responde em privado e registra nos logs/punições.
+- `/kick <membro> [motivo]` — expulsa respeitando hierarquia de cargos, responde em privado e registra nos logs/punições.
+- `/ban <membro> [motivo] [deletar_mensagens_dias]` — bane respeitando hierarquia, responde em privado e registra nos logs/punições.
 - `/clear <quantidade>` — apaga de 1 a 100 mensagens do canal atual com resposta privada e log.
+
+A mensagem pública de punição fica só no `canal_punicoes`. A confirmação do comando é privada para quem executou.
 
 ---
 

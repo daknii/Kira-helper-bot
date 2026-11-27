@@ -65,6 +65,18 @@ class EmbedBuilderModal(discord.ui.Modal, title="criar embed"):
             )
             return
 
+        title = self.titulo.value.strip()
+        description = self.descricao.value.strip()
+        if not title or not description:
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description="título e descrição não podem ficar vazios.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+
         image = self.imagem_url.value.strip()
         if image and not (image.startswith("http://") or image.startswith("https://")):
             await interaction.response.send_message(
@@ -87,14 +99,25 @@ class EmbedBuilderModal(discord.ui.Modal, title="criar embed"):
             return
 
         custom_embed = discord.Embed(
-            title=self.titulo.value.strip(),
-            description=self.descricao.value.strip(),
+            title=title,
+            description=description,
             color=color_value,
         )
         if image:
             custom_embed.set_image(url=image)
 
-        await interaction.channel.send(embed=custom_embed)
+        try:
+            await interaction.channel.send(embed=custom_embed)
+        except (discord.Forbidden, discord.HTTPException):
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description="não foi possível enviar o embed. confira a url da imagem e as permissões do bot neste canal.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+
         await interaction.response.send_message(
             embed=discord.Embed(
                 description="embed enviado neste canal.",
@@ -117,13 +140,12 @@ class Setup(commands.Cog):
     @app_commands.describe(
         canal_logs="canal de logs da staff e transcripts de tickets",
         categoria_tickets="categoria onde os tickets serão criados",
-        cargo_staff_1="cargo de staff 1 (ex: alto-escalão)",
-        cargo_staff_2="cargo de staff 2 (opcional)",
-        cargo_staff_3="cargo de staff 3 (opcional)",
+        cargo_staff_1="adiciona um cargo de staff (ex: alto-escalão)",
+        cargo_staff_2="adiciona outro cargo de staff (opcional)",
+        cargo_staff_3="adiciona outro cargo de staff (opcional)",
         canal_entrada="canal de boas-vindas",
         canal_saida="canal de avisos de saída",
         canal_punicoes="mural público de punições",
-        canal_analise_divisao="canal para análise de pedidos de divisão",
     )
     @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
@@ -138,16 +160,30 @@ class Setup(commands.Cog):
         canal_entrada: discord.TextChannel | None = None,
         canal_saida: discord.TextChannel | None = None,
         canal_punicoes: discord.TextChannel | None = None,
-        canal_analise_divisao: discord.TextChannel | None = None,
     ) -> None:
         assert interaction.guild is not None
 
-        provided_staff = [
-            role.id
+        provided_roles = [
+            role
             for role in (cargo_staff_1, cargo_staff_2, cargo_staff_3)
             if role is not None
         ]
-        staff_role_ids = list(dict.fromkeys(provided_staff)) if provided_staff else None
+        if any(role.is_default() for role in provided_roles):
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description="o cargo @everyone não pode ser usado como staff.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+
+        staff_role_ids: list[int] | None = None
+        if provided_roles:
+            current_roles = await self.bot.db.get_staff_roles(interaction.guild.id)
+            staff_role_ids = list(
+                dict.fromkeys([*current_roles, *(role.id for role in provided_roles)])
+            )
 
         updated = any(
             param is not None
@@ -158,7 +194,6 @@ class Setup(commands.Cog):
                 canal_entrada,
                 canal_saida,
                 canal_punicoes,
-                canal_analise_divisao,
             )
         )
 
@@ -171,9 +206,6 @@ class Setup(commands.Cog):
                 canal_entrada=canal_entrada.id if canal_entrada else None,
                 canal_saida=canal_saida.id if canal_saida else None,
                 canal_punicoes=canal_punicoes.id if canal_punicoes else None,
-                canal_analise_divisao=(
-                    canal_analise_divisao.id if canal_analise_divisao else None
-                ),
             )
             title = "configuração salva"
         else:
@@ -199,7 +231,6 @@ class Setup(commands.Cog):
             f"canal de entrada · {fmt_channel(config['canal_entrada'] if config else None)}",
             f"canal de saída · {fmt_channel(config['canal_saida'] if config else None)}",
             f"canal de punições · {fmt_channel(config['canal_punicoes'] if config else None)}",
-            f"análise de divisão · {fmt_channel(config['canal_analise_divisao'] if config else None)}",
         ]
 
         embed = discord.Embed(
@@ -224,6 +255,16 @@ class Setup(commands.Cog):
         cargo: discord.Role,
     ) -> None:
         assert interaction.guild is not None
+
+        if cargo.is_default():
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description="o cargo @everyone não pode ser usado como staff.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
 
         roles = await self.bot.db.add_staff_role(interaction.guild.id, cargo.id)
         staff_text = " ".join(f"<@&{role_id}>" for role_id in roles)
@@ -280,7 +321,7 @@ class Setup(commands.Cog):
                 ),
                 color=DEFAULT_COLOR,
             )
-            embed.set_footer(text=interaction.guild.name.lower())
+        embed.set_footer(text=interaction.guild.name.lower())
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -308,7 +349,16 @@ class Setup(commands.Cog):
             )
             return
 
-        ticket_mention = canal_tickets.mention if canal_tickets else "<#ID_DO_CANAL_TICKET>"
+        if canal_tickets:
+            support_line = (
+                f"**11. suporte**\nprecisa de ajuda? abra um ticket em {canal_tickets.mention} "
+                "ou chame a equipe superior."
+            )
+        else:
+            support_line = (
+                "**11. suporte**\nprecisa de ajuda? abra um ticket no canal de suporte "
+                "ou chame a equipe superior."
+            )
 
         rules_text = "\n\n".join(
             [
@@ -323,7 +373,7 @@ class Setup(commands.Cog):
                 "**08. sem divulgação**\nproibido divulgar links ou outros servidores sem permissão.",
                 "**09. hierarquia e ordem**\nrespeite as orientações e decisões da moderação.",
                 "**10. bom senso**\nmantenha o ambiente agradável, divertido e respeitoso.",
-                f"**11. suporte**\nprecisa de ajuda? abra um ticket em {ticket_mention} ou chame a equipe superior.",
+                support_line,
             ]
         )
 
@@ -336,7 +386,18 @@ class Setup(commands.Cog):
             text="ao permanecer no servidor, você concorda com todas as regras acima."
         )
 
-        await interaction.channel.send(embed=embed)
+        try:
+            await interaction.channel.send(embed=embed)
+        except (discord.Forbidden, discord.HTTPException):
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description="não foi possível enviar as regras neste canal. verifique as permissões do bot.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+
         await interaction.response.send_message(
             embed=discord.Embed(
                 description="painel de regras enviado neste canal.",

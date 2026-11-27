@@ -88,7 +88,7 @@ class Moderation(commands.Cog):
         moderator: discord.abc.User,
         duration: str | None = None,
     ) -> None:
-        """Envia um embed resumido no canal público de punições (punishments_channel_id)."""
+        """Envia um embed resumido no canal público de punições."""
         config = await self.bot.db.get_guild_config(guild.id)
         if not config or not config["canal_punicoes"]:
             return
@@ -140,7 +140,7 @@ class Moderation(commands.Cog):
         self,
         interaction: discord.Interaction,
         membro: discord.Member,
-        motivo: str,
+        motivo: app_commands.Range[str, 1, 400],
     ) -> None:
         assert interaction.guild is not None
         assert isinstance(interaction.user, discord.Member)
@@ -262,17 +262,25 @@ class Moderation(commands.Cog):
             )
             return
 
+        shown = rows[:10]
         entries: list[str] = []
-        for row in rows[:20]:
+        for row in shown:
+            reason = str(row["reason"]).replace("\n", " ")
+            if len(reason) > 180:
+                reason = reason[:177] + "..."
             created_at = str(row["created_at"])[:16]
             entries.append(
-                f"`#{row['id']}` · {row['reason']}\n"
+                f"`#{row['id']}` · {reason}\n"
                 f"moderador · <@{row['moderator_id']}> · data · `{created_at}`"
             )
 
+        description = "\n\n".join(entries)
+        if len(rows) > len(shown):
+            description += f"\n\nmostrando as `{len(shown)}` mais recentes de `{len(rows)}`."
+
         embed = discord.Embed(
             title=f"advertências · {membro.display_name.lower()}",
-            description="\n\n".join(entries),
+            description=description,
             color=DEFAULT_COLOR,
         )
         embed.set_footer(text=f"total · {len(rows)} advertência(s)")
@@ -350,7 +358,7 @@ class Moderation(commands.Cog):
         interaction: discord.Interaction,
         membro: discord.Member,
         minutos: app_commands.Range[int, 1, 40320],
-        motivo: str = "sem motivo informado",
+        motivo: app_commands.Range[str, 1, 400] = "sem motivo informado",
     ) -> None:
         assert interaction.guild is not None
         assert isinstance(interaction.user, discord.Member)
@@ -370,14 +378,20 @@ class Moderation(commands.Cog):
             )
             return
 
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
-        duration = timedelta(minutes=minutos)
+        until = datetime.now(timezone.utc) + timedelta(minutes=minutos)
         try:
-            await membro.timeout(duration, reason=f"{interaction.user}: {motivo}")
+            await membro.timeout(until, reason=f"{interaction.user}: {motivo}")
         except discord.Forbidden:
             await interaction.followup.send(
                 embed=self._error_embed("não tenho permissão para aplicar timeout neste membro."),
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException:
+            await interaction.followup.send(
+                embed=self._error_embed("não foi possível aplicar o timeout neste membro."),
                 ephemeral=True,
             )
             return
@@ -393,7 +407,7 @@ class Moderation(commands.Cog):
             ),
             color=DEFAULT_COLOR,
         )
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
         log_embed = discord.Embed(
             title="log · timeout",
@@ -430,7 +444,7 @@ class Moderation(commands.Cog):
         self,
         interaction: discord.Interaction,
         membro: discord.Member,
-        motivo: str = "sem motivo informado",
+        motivo: app_commands.Range[str, 1, 400] = "sem motivo informado",
     ) -> None:
         assert interaction.guild is not None
         assert isinstance(interaction.user, discord.Member)
@@ -450,13 +464,19 @@ class Moderation(commands.Cog):
             )
             return
 
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
             await membro.kick(reason=f"{interaction.user}: {motivo}")
         except discord.Forbidden:
             await interaction.followup.send(
                 embed=self._error_embed("não tenho permissão para expulsar este membro."),
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException:
+            await interaction.followup.send(
+                embed=self._error_embed("não foi possível expulsar este membro."),
                 ephemeral=True,
             )
             return
@@ -471,7 +491,7 @@ class Moderation(commands.Cog):
             ),
             color=DEFAULT_COLOR,
         )
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
         log_embed = discord.Embed(
             title="log · kick",
@@ -507,7 +527,7 @@ class Moderation(commands.Cog):
         self,
         interaction: discord.Interaction,
         membro: discord.Member,
-        motivo: str = "sem motivo informado",
+        motivo: app_commands.Range[str, 1, 400] = "sem motivo informado",
         deletar_mensagens_dias: app_commands.Range[int, 0, 7] = 0,
     ) -> None:
         assert interaction.guild is not None
@@ -528,7 +548,7 @@ class Moderation(commands.Cog):
             )
             return
 
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
             await membro.ban(
@@ -538,6 +558,12 @@ class Moderation(commands.Cog):
         except discord.Forbidden:
             await interaction.followup.send(
                 embed=self._error_embed("não tenho permissão para banir este membro."),
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException:
+            await interaction.followup.send(
+                embed=self._error_embed("não foi possível banir este membro."),
                 ephemeral=True,
             )
             return
@@ -553,7 +579,7 @@ class Moderation(commands.Cog):
             ),
             color=DEFAULT_COLOR,
         )
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
         log_embed = discord.Embed(
             title="log · ban",
@@ -608,9 +634,9 @@ class Moderation(commands.Cog):
 
         try:
             deleted = await channel.purge(limit=quantidade)
-        except discord.Forbidden:
+        except (discord.Forbidden, discord.HTTPException):
             await interaction.followup.send(
-                embed=self._error_embed("não tenho permissão para apagar mensagens neste canal."),
+                embed=self._error_embed("não foi possível apagar as mensagens neste canal."),
                 ephemeral=True,
             )
             return
