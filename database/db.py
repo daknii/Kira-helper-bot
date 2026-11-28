@@ -56,7 +56,11 @@ class Database:
                 staff_role_ids TEXT DEFAULT '[]',
                 canal_entrada INTEGER,
                 canal_saida INTEGER,
-                canal_punicoes INTEGER
+                canal_punicoes INTEGER,
+                canal_armadilha INTEGER,
+                cargo_recrutados INTEGER,
+                cargo_aprendiz INTEGER,
+                cargo_samurai INTEGER
             );
             """
         )
@@ -82,6 +86,7 @@ class Database:
                 "canal_entrada": "welcome_channel_id",
                 "canal_saida": "leave_channel_id",
                 "canal_punicoes": "punishments_channel_id",
+                "canal_armadilha": None,
             }
 
             select_exprs = ["guild_id"]
@@ -127,7 +132,11 @@ class Database:
                     staff_role_ids TEXT DEFAULT '[]',
                     canal_entrada INTEGER,
                     canal_saida INTEGER,
-                    canal_punicoes INTEGER
+                    canal_punicoes INTEGER,
+                    canal_armadilha INTEGER,
+                    cargo_recrutados INTEGER,
+                    cargo_aprendiz INTEGER,
+                    cargo_samurai INTEGER
                 );
                 INSERT INTO guild_config_new (
                     guild_id,
@@ -136,6 +145,7 @@ class Database:
                     canal_entrada,
                     canal_saida,
                     canal_punicoes,
+                    canal_armadilha,
                     staff_role_ids
                 )
                 SELECT {", ".join(select_exprs)} FROM guild_config;
@@ -151,6 +161,10 @@ class Database:
                 "canal_entrada": "INTEGER",
                 "canal_saida": "INTEGER",
                 "canal_punicoes": "INTEGER",
+                "canal_armadilha": "INTEGER",
+                "cargo_recrutados": "INTEGER",
+                "cargo_aprendiz": "INTEGER",
+                "cargo_samurai": "INTEGER",
             }
             for col, col_type in expected_columns.items():
                 if col not in existing_columns:
@@ -177,7 +191,11 @@ class Database:
                 staff_role_ids,
                 canal_entrada,
                 canal_saida,
-                canal_punicoes
+                canal_punicoes,
+                canal_armadilha,
+                cargo_recrutados,
+                cargo_aprendiz,
+                cargo_samurai
             FROM guild_config
             WHERE guild_id = ?
             """,
@@ -195,6 +213,7 @@ class Database:
         canal_entrada: int | None = None,
         canal_saida: int | None = None,
         canal_punicoes: int | None = None,
+        canal_armadilha: int | None = None,
     ) -> aiosqlite.Row:
         """Salva ou atualiza parcialmente a configuração do servidor."""
         assert self.conn is not None
@@ -213,9 +232,10 @@ class Database:
                 staff_role_ids,
                 canal_entrada,
                 canal_saida,
-                canal_punicoes
+                canal_punicoes,
+                canal_armadilha
             )
-            VALUES (?, ?, ?, COALESCE(?, '[]'), ?, ?, ?)
+            VALUES (?, ?, ?, COALESCE(?, '[]'), ?, ?, ?, ?)
             ON CONFLICT(guild_id) DO UPDATE SET
                 canal_logs = COALESCE(excluded.canal_logs, guild_config.canal_logs),
                 categoria_tickets = COALESCE(excluded.categoria_tickets, guild_config.categoria_tickets),
@@ -225,7 +245,8 @@ class Database:
                 END,
                 canal_entrada = COALESCE(excluded.canal_entrada, guild_config.canal_entrada),
                 canal_saida = COALESCE(excluded.canal_saida, guild_config.canal_saida),
-                canal_punicoes = COALESCE(excluded.canal_punicoes, guild_config.canal_punicoes)
+                canal_punicoes = COALESCE(excluded.canal_punicoes, guild_config.canal_punicoes),
+                canal_armadilha = COALESCE(excluded.canal_armadilha, guild_config.canal_armadilha)
             """,
             (
                 guild_id,
@@ -235,9 +256,54 @@ class Database:
                 canal_entrada,
                 canal_saida,
                 canal_punicoes,
+                canal_armadilha,
                 serialized_staff,
                 serialized_staff,
             ),
+        )
+        await self.conn.commit()
+        row = await self.get_guild_config(guild_id)
+        assert row is not None
+        return row
+
+    async def clear_trap_channel(self, guild_id: int) -> None:
+        """Remove o canal armadilha configurado para o servidor."""
+        assert self.conn is not None
+        await self.conn.execute(
+            """
+            UPDATE guild_config
+            SET canal_armadilha = NULL
+            WHERE guild_id = ?
+            """,
+            (guild_id,),
+        )
+        await self.conn.commit()
+
+    async def set_division_roles(
+        self,
+        guild_id: int,
+        *,
+        cargo_recrutados: int,
+        cargo_aprendiz: int,
+        cargo_samurai: int | None = None,
+    ) -> aiosqlite.Row:
+        """Salva os cargos usados no painel de testes de divisão."""
+        assert self.conn is not None
+        await self.conn.execute(
+            """
+            INSERT INTO guild_config (
+                guild_id,
+                cargo_recrutados,
+                cargo_aprendiz,
+                cargo_samurai
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                cargo_recrutados = excluded.cargo_recrutados,
+                cargo_aprendiz = excluded.cargo_aprendiz,
+                cargo_samurai = excluded.cargo_samurai
+            """,
+            (guild_id, cargo_recrutados, cargo_aprendiz, cargo_samurai),
         )
         await self.conn.commit()
         row = await self.get_guild_config(guild_id)

@@ -8,7 +8,12 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from cogs.tickets import TicketCloseView, TicketOpenView
+from cogs.tickets import (
+    DivisionTicketControlView,
+    DivisionTicketOpenView,
+    TicketCloseView,
+    TicketOpenView,
+)
 from database.db import Database
 
 logging.basicConfig(
@@ -48,6 +53,8 @@ class KiraBot(commands.Bot):
 
         # 3. Registra Views persistentes (timeout=None)
         self.add_view(TicketOpenView())
+        self.add_view(DivisionTicketOpenView())
+        self.add_view(DivisionTicketControlView())
         self.add_view(TicketCloseView())
         logger.info("Views persistentes registradas com sucesso.")
 

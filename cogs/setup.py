@@ -52,6 +52,12 @@ class EmbedBuilderModal(discord.ui.Modal, title="criar embed"):
         max_length=512,
         required=False,
     )
+    rodape = discord.ui.TextInput(
+        label="footer (opcional)",
+        placeholder="padrão: nome do servidor",
+        max_length=2048,
+        required=False,
+    )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         color_value = parse_hex_color(self.cor_hex.value)
@@ -106,6 +112,12 @@ class EmbedBuilderModal(discord.ui.Modal, title="criar embed"):
         if image:
             custom_embed.set_image(url=image)
 
+        footer_text = self.rodape.value.strip()
+        if not footer_text and interaction.guild:
+            footer_text = interaction.guild.name.lower()
+        if footer_text:
+            custom_embed.set_footer(text=footer_text)
+
         try:
             await interaction.channel.send(embed=custom_embed)
         except (discord.Forbidden, discord.HTTPException):
@@ -146,6 +158,7 @@ class Setup(commands.Cog):
         canal_entrada="canal de boas-vindas",
         canal_saida="canal de avisos de saída",
         canal_punicoes="mural público de punições",
+        canal_armadilha="canal armadilha (quem enviar mensagem é banido automaticamente)",
     )
     @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
@@ -160,6 +173,7 @@ class Setup(commands.Cog):
         canal_entrada: discord.TextChannel | None = None,
         canal_saida: discord.TextChannel | None = None,
         canal_punicoes: discord.TextChannel | None = None,
+        canal_armadilha: discord.TextChannel | None = None,
     ) -> None:
         assert interaction.guild is not None
 
@@ -194,6 +208,7 @@ class Setup(commands.Cog):
                 canal_entrada,
                 canal_saida,
                 canal_punicoes,
+                canal_armadilha,
             )
         )
 
@@ -206,6 +221,7 @@ class Setup(commands.Cog):
                 canal_entrada=canal_entrada.id if canal_entrada else None,
                 canal_saida=canal_saida.id if canal_saida else None,
                 canal_punicoes=canal_punicoes.id if canal_punicoes else None,
+                canal_armadilha=canal_armadilha.id if canal_armadilha else None,
             )
             title = "configuração salva"
         else:
@@ -231,6 +247,7 @@ class Setup(commands.Cog):
             f"canal de entrada · {fmt_channel(config['canal_entrada'] if config else None)}",
             f"canal de saída · {fmt_channel(config['canal_saida'] if config else None)}",
             f"canal de punições · {fmt_channel(config['canal_punicoes'] if config else None)}",
+            f"canal armadilha · {fmt_channel(config['canal_armadilha'] if config else None)}",
         ]
 
         embed = discord.Embed(
@@ -401,6 +418,96 @@ class Setup(commands.Cog):
         await interaction.response.send_message(
             embed=discord.Embed(
                 description="painel de regras enviado neste canal.",
+                color=DEFAULT_COLOR,
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="setup-armadilha",
+        description="configura o canal atual como armadilha anti-spam e envia o aviso.",
+    )
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.guild_only()
+    async def setup_armadilha(self, interaction: discord.Interaction) -> None:
+        assert interaction.guild is not None
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description="este comando só pode ser usado em um canal de texto.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await self.bot.db.upsert_guild_config(
+            interaction.guild.id,
+            canal_armadilha=channel.id,
+        )
+
+        warning_embed = discord.Embed(
+            title="⚠ não envie mensagens aqui",
+            description=(
+                "este canal é uma **armadilha anti-spam**.\n"
+                "qualquer membro que enviar uma mensagem neste canal será **banido automaticamente**.\n\n"
+                "administradores e cargos da staff são imunes."
+            ),
+            color=DEFAULT_COLOR,
+        )
+        warning_embed.set_footer(text=interaction.guild.name.lower())
+
+        try:
+            await channel.send(embed=warning_embed)
+        except (discord.Forbidden, discord.HTTPException):
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description=(
+                        f"{channel.mention} foi salvo como canal armadilha, mas não foi possível "
+                        "enviar o aviso aqui. verifique as permissões do bot."
+                    ),
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                description=(
+                    f"{channel.mention} configurado como **canal armadilha**.\n"
+                    "qualquer membro comum que enviar mensagem aqui será banido automaticamente."
+                ),
+                color=DEFAULT_COLOR,
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="desativar-armadilha",
+        description="desativa o canal armadilha configurado no servidor.",
+    )
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.guild_only()
+    async def desativar_armadilha(self, interaction: discord.Interaction) -> None:
+        assert interaction.guild is not None
+        config = await self.bot.db.get_guild_config(interaction.guild.id)
+        if not config or not config["canal_armadilha"]:
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description="nenhum canal armadilha está ativo no momento.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+
+        previous_id = config["canal_armadilha"]
+        await self.bot.db.clear_trap_channel(interaction.guild.id)
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                description=f"canal armadilha (<#{previous_id}>) desativado.",
                 color=DEFAULT_COLOR,
             ),
             ephemeral=True,

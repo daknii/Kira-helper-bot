@@ -33,6 +33,7 @@ Em qualquer canal (restrito a **Administradores**), execute `/configurar`:
 | `canal_entrada` | Canal de texto | Mensagens automáticas de boas-vindas (`#🌊・entrada`) |
 | `canal_saida` | Canal de texto | Avisos discretos de saída (`#🌊・saída`) |
 | `canal_punicoes` | Canal de texto | Mural público de punições (`#⚠️・punições`) |
+| `canal_armadilha` | Canal de texto | Canal armadilha anti-spam: quem enviar mensagem lá é banido automaticamente |
 
 - Todos os campos são **opcionais**: preencher um canal atualiza só aquele campo.
 - `cargo_staff_1`, `cargo_staff_2` e `cargo_staff_3` **somam** cargos à lista. Eles não apagam os que já estavam salvos. Para remover, use `/remove-staff`.
@@ -63,11 +64,31 @@ Todos os cargos da lista recebem automaticamente:
    ```
    Publica o painel de suporte com o botão persistente **abrir ticket** (continua ativo mesmo após reiniciar o bot).
 
-3. **Embeds personalizados (opcional):**
+3. **Canal de Testes de Divisão:**
+   ```text
+   /setup-divisoes cargo_recrutados:@Recrutados cargo_aprendiz:@Aprendiz cargo_samurai:@Samurai
+   ```
+   Salva os cargos das divisões (você pode selecionar o cargo ou colar o ID diretamente) e publica o painel com os botões persistentes **teste · aprendiz** (exige `Recrutados`) e **teste · samurai** (exige `Aprendiz`).
+   - Ao clicar, o bot cria um canal privado na mesma categoria de tickets (`categoria_tickets`).
+   - Dentro do canal, a staff tem os botões **aprovar**, **reprovar** e **fechar ticket**:
+     - **aprovar**: atribui automaticamente o novo cargo (`Aprendiz` ou `Samurai`), mantendo sempre o cargo `Recrutados` (e removendo `Aprendiz` ao subir para `Samurai`), e registra em `canal_logs`.
+     - **reprovar**: avisa o resultado no canal sem alterar cargos e registra em `canal_logs`.
+     - **fechar ticket**: gera transcript `.txt` no `canal_logs` e deleta o canal após 5s.
+
+4. **Canal Armadilha (anti-spam, opcional):**
+   ```text
+   /setup-armadilha
+   ```
+   Salva o canal atual como `canal_armadilha` e publica um aviso para membros humanos não enviarem mensagens ali.
+   - Qualquer membro comum que enviar mensagem nesse canal (ou em threads dentro dele) é **banido automaticamente** com exclusão das mensagens das últimas 24h e registro em `canal_logs` e `canal_punicoes`.
+   - O dono do servidor, administradores, bots e cargos da lista `staff` são imunes.
+   - Para desligar depois, use `/desativar-armadilha`.
+
+5. **Embeds personalizados (opcional):**
    ```text
    /embed
    ```
-   Abre um formulário para enviar comunicados com título, descrição, cor hex opcional (padrão `#2B2D31`) e URL de imagem opcional.
+   Abre um formulário para enviar comunicados com título, descrição, cor hex opcional (padrão `#2B2D31`), URL de imagem opcional e footer opcional (se ficar vazio, usa automaticamente o nome do servidor).
 
 ---
 
