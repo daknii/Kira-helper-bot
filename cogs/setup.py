@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 import discord
@@ -521,6 +522,76 @@ class Setup(commands.Cog):
     @app_commands.guild_only()
     async def embed(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(EmbedBuilderModal())
+
+    @app_commands.command(
+        name="backup-db",
+        description="exporta um backup do banco de dados SQLite na sua DM (apenas dono do bot).",
+    )
+    async def backup_db(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.is_owner(interaction.user):
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description="acesso negado. apenas o dono da aplicação pode usar este comando.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        if self.bot.db.conn is not None:
+            await self.bot.db.conn.commit()
+            await self.bot.db.conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+
+        db_path = self.bot.db.db_path
+        if not db_path.exists():
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    description=f"arquivo `{db_path.name}` não encontrado.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+
+        now = datetime.now()
+        timestamp_str = now.strftime("%d/%m/%Y às %H:%M:%S")
+
+        try:
+            await interaction.user.send(
+                content=f"backup do banco de dados (`bot.db`) gerado em **{timestamp_str}**.",
+                file=discord.File(str(db_path), filename="bot.db"),
+            )
+        except discord.Forbidden:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    description=(
+                        "não foi possível enviar o backup no privado. "
+                        "verifique se suas mensagens diretas (DM) estão abertas."
+                    ),
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    description="ocorreu um erro ao enviar o arquivo de backup pelo Discord.",
+                    color=DEFAULT_COLOR,
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send(
+            embed=discord.Embed(
+                description=f"backup de `{db_path.name}` enviado no seu privado ({timestamp_str}).",
+                color=DEFAULT_COLOR,
+            ),
+            ephemeral=True,
+        )
 
 
 async def setup(bot: KiraBot) -> None:
